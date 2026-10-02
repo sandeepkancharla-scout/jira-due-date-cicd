@@ -1,27 +1,31 @@
 from flask import Flask
 from flask import jsonify
-from flask import request
+import flask
 
 from scripts.validate_jira_ticket import validate_issue
 
 app = Flask(__name__)
 
 
-@app.route("/health")
+@app.route("/health", methods=["GET"])
 def health():
-    return {
-        "status": "healthy"
-    }
+    return jsonify(
+        {
+            "status": "healthy"
+        }
+    )
 
 
 @app.route("/webhook/jira", methods=["POST"])
 def jira_webhook():
+
     payload = request.get_json()
 
-    if not payload:
+    if payload is None:
         return jsonify(
             {
-                "error": "Invalid payload"
+                "status": "ERROR",
+                "message": "Invalid JSON payload"
             }
         ), 400
 
@@ -31,4 +35,8 @@ def jira_webhook():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True
+    )
