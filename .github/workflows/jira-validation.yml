@@ -1,46 +1,29 @@
-name: Jira Validation CI
+name: Jira Validation
 
 on:
-  push:
-    branches:
-      - master
-      - main
-
-  pull_request:
-    branches:
-      - master
-      - main
+  repository_dispatch:
+    types:
+      - jira_validation
 
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Dependencies
+      - name: Show Validation Result
         run: |
-          python -m pip install --upgrade pip
+          echo "Status: ${{ github.event.client_payload.status }}"
+          echo "Message: ${{ github.event.client_payload.message }}"
 
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+      - name: Fail When Validation Fails
+        run: |
+          STATUS="${{ github.event.client_payload.status }}"
+
+          if [ "$STATUS" = "FAIL" ]; then
+            echo "Validation failed"
+            exit 1
           fi
 
-      - name: Run Unit Tests
-        run: |
-          python -m pytest -v
-
-      - name: Success Message
-        run: |
-          echo "Pipeline completed successfully"
+          echo "Validation passed"
