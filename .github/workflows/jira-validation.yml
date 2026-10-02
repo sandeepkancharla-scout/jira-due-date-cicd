@@ -1,0 +1,167 @@
+name: Jira Ticket Validation
+
+on:
+  repository_dispatch:
+    types:
+      - jira-ticket-updated
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jira-validation-${{ github.event.client_payload.issue.key }}
+  cancel-in-progress: false
+
+jobs:
+  unit-tests:
+    name: Run validation unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m pytest -v
+
+  validate-jira-ticket:
+    name: Validate Jira ticket
+    needs:
+      - unit-tests
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      issue_key: ${{ steps.validate.outputs.issue_key }}
+      summary: ${{ steps.validate.outputs.summary }}
+      label_found: ${{ steps.validate.outputs.label_found }}
+      due_date_empty: ${{ steps.validate.outputs.due_date_empty }}
+      assignee_name: ${{ steps.validate.outputs.assignee_name }}
+      assignee_email: ${{ steps.validate.outputs.assignee_email }}
+      assignee_email_available: ${{ steps.validate.outputs.assignee_email_available }}
+      notification_required: ${{ steps.validate.outputs.notification_required }}
+      validation_failed: ${{ steps.validate.outputs.validation_failed }}
+      continue_pipeline: ${{ steps.validate.outputs.continue_pipeline }}
+      validation_message: ${{ steps.validate.outputs.validation_message }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Save Jira event payload
+        env:
+          JIRA_CLIENT_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          printf '%s' "$JIRA_CLIENT_PAYLOAD" > jira-payload.json
+
+      - name: Validate Jira ticket
+        id: validate
+        run: |
+          python scripts/validate_jira_ticket.py jira-payload.json
+
+      - name: Write validation summary
+        env:
+          ISSUE_KEY: ${{ steps.validate.outputs.issue_key }}
+          LABEL_FOUND: ${{ steps.validate.outputs.label_found }}
+          DUE_DATE_EMPTY: ${{ steps.validate.outputs.due_date_empty }}
+          ASSIGNEE_NAME: ${{ steps.validate.outputs.assignee_name }}
+          EMAIL_AVAILABLE: ${{ steps.validate.outputs.assignee_email_available }}
+          NOTIFICATION_REQUIRED: ${{ steps.validate.outputs.notification_required }}
+          CONTINUE_PIPELINE: ${{ steps.validate.outputs.continue_pipeline }}
+          VALIDATION_MESSAGE: ${{ steps.validate.outputs.validation_message }}
+        run: |
+          {
+            echo "## Jira ticket validation"
+            echo ""
+            echo "- Ticket: $ISSUE_KEY"
+            echo "- Exact Test label found: $LABEL_FOUND"
+            echo "- Due Date empty: $DUE_DATE_EMPTY"
+            echo "- Assignee: $ASSIGNEE_NAME"
+            echo "- Assignee email available: $EMAIL_AVAILABLE"
+            echo "- Notification required: $NOTIFICATION_REQUIRED"
+            echo "- Continue pipeline: $CONTINUE_PIPELINE"
+            echo "- Result: $VALIDATION_MESSAGE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify-assignee:
+    name: Notify Jira assignee
+    needs:
+      - validate-jira-ticket
+
+    if: >
+      needs.validate-jira-ticket.outputs.notification_required == 'true'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Email Jira assignee
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+
+          ASSIGNEE_EMAIL: ${{ needs.validate-jira-ticket.outputs.assignee_email }}
+          ASSIGNEE_NAME: ${{ needs.validate-jira-ticket.outputs.assignee_name }}
+          ISSUE_KEY: ${{ needs.validate-jira-ticket.outputs.issue_key }}
+          ISSUE_SUMMARY: ${{ needs.validate-jira-ticket.outputs.summary }}
+        run: |
+          python scripts/send_email.py
+
+  fail-missing-assignee-email:
+    name: Fail when assignee email is unavailable
+    needs:
+      - validate-jira-ticket
+
+    if: >
+      needs.validate-jira-ticket.outputs.validation_failed == 'true' &&
+      needs.validate-jira-ticket.outputs.assignee_email_available == 'false'
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Report missing assignee email
+        run: |
+          echo "::error::The Jira ticket has the exact Test label and an empty Due Date, but Jira did not provide the assignee email address."
+          exit 1
+
+  fail-validation:
+    name: Fail Jira Due Date 
