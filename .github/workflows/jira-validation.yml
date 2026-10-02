@@ -7,23 +7,34 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Show Validation Result
+      - name: Show Validation Payload
         run: |
-          echo "Status: ${{ github.event.client_payload.status }}"
+          echo "Status : ${{ github.event.client_payload.status }}"
+          echo "Issue  : ${{ github.event.client_payload.issue_key }}"
           echo "Message: ${{ github.event.client_payload.message }}"
 
-      - name: Fail When Validation Fails
+      - name: Evaluate Validation
         run: |
           STATUS="${{ github.event.client_payload.status }}"
 
+          echo "Status = $STATUS"
+
           if [ "$STATUS" = "FAIL" ]; then
-            echo "Validation failed"
+            echo "Validation Failed"
             exit 1
           fi
 
-          echo "Validation passed"
+          if [ "$STATUS" = "SKIP" ]; then
+            echo "Validation Skipped"
+            exit 0
+          fi
+
+          echo "Validation Passed"
