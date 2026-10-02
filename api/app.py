@@ -1,6 +1,6 @@
 from flask import Flask
 from flask import jsonify
-import flask
+from flask import request
 
 from scripts.validate_jira_ticket import validate_issue
 
